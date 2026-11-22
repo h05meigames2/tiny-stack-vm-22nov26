@@ -30,8 +30,6 @@ for (const [op, im, po, pu] of SPEC) {
   IMM[op] = im; POPN[op] = po; PUSHN[op] = pu; KNOWN[op] = 1;
 }
 
-const enc = new TextEncoder();
-
 function runVM(prog: Uint8Array, input: Uint8Array): { out: Uint8Array; exit: number } {
   const n = prog.length;
   const st = new Int32Array(256); // data stack
@@ -124,12 +122,17 @@ function runVM(prog: Uint8Array, input: Uint8Array): { out: Uint8Array; exit: nu
         mem[addr] = v;
         break;
       }
-      case 0x50: { // PRINT: decimal ASCII, no newline
-        const bytes = enc.encode(String(st[sp - 1]));
-        if (olen + bytes.length > OUT_MAX) return done(11);
-        out.set(bytes, olen);
-        olen += bytes.length;
-        sp--;
+      case 0x50: { // PRINT: decimal ASCII, no newline; digits written straight
+        // into out (no string/TextEncoder allocation per print)
+        let v = st[--sp];
+        const neg = v < 0;
+        if (neg) v = -v; // exact in doubles even for -2147483648
+        const dig = new Uint8Array(10); // digits of |v|, least significant first
+        let tl = 0;
+        do { dig[tl++] = 48 + (v % 10); v = (v / 10) | 0; } while (v > 0);
+        if (olen + tl + (neg ? 1 : 0) > OUT_MAX) return done(11);
+        if (neg) out[olen++] = 45; // '-'
+        while (tl > 0) out[olen++] = dig[--tl];
         break;
       }
       case 0x51: // PUTC: one byte, v AND 255
